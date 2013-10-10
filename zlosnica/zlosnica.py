@@ -3,38 +3,23 @@
 
 __author__ = u"Rafal Selewonko <rselewonko@murator.com.pl>"
 
-
-import math
 from PIL import Image
-
-
-def convert(img, scale=1., watermark_img=None, watermark_coverage=.3, watermark_opacity=1.):
-
-    width, height = img.size
-    new_width, new_height = round(width * scale), round(height * scale)
-    img.thumbnail(map(int, (new_width, new_height)), Image.ANTIALIAS)
-
-    watermark_width, watermark_height = watermark_img.size
-    new_watermark_width = math.ceil(new_width * watermark_coverage)
-    new_watermark_height = math.ceil(new_watermark_width / float(watermark_width) * watermark_height)
-    watermark_img.thumbnail(map(int, (new_watermark_width, new_watermark_height)), Image.ANTIALIAS)
-
-    coords = tuple(map(int, (new_width - new_watermark_width, new_height - new_watermark_height)))
-    img.paste(watermark_img, coords, watermark_img)
-
-    return img
+from .convert import convert
 
 
 if __name__ == "__main__":
     import argparse
     import os
     import sys
-    from glob import glob
+    #import glob
 
     parser = argparse.ArgumentParser()
     parser.add_argument('infile', type=str, nargs='+')
     parser.add_argument('-o', '--outfile', type=str)
-    parser.add_argument('-s', '--scale', type=int, default=100)
+    parser.add_argument('-q', '--quiet', action="store_true")
+    parser.add_argument('-s', '--scale', type=int)
+    parser.add_argument('-mw', '--max_width', type=int)
+    parser.add_argument('-mh', '--max_height', type=int)
     parser.add_argument('-w', '--watermark', type=argparse.FileType('r'))
     parser.add_argument('-wc', '--watermark-coverage', type=int, default=30)
     parser.add_argument('-wo', '--watermark-opacity', type=int, default=100)
@@ -42,12 +27,14 @@ if __name__ == "__main__":
 
     infiles = []
     for infile in args.infile:
-        #infiles.extend(glob(infile))
+        #infiles.extend(glob.glob(infile))
         infiles.append(infile)
 
     outfile = None
     if args.outfile:
         outfile = args.outfile
+
+    total = len(infiles)
 
     if outfile:
         if len(infiles) == 1:
@@ -65,7 +52,27 @@ if __name__ == "__main__":
             sys.stderr.write(str(e))
             sys.stderr.write("\n")
 
-    for i, infile in enumerate(infiles):
+    scale = None
+    if args.scale:
+        scale = args.scale / 100.
+
+    width = None
+    if args.max_width:
+        width = args.max_width
+
+    height = None
+    if args.max_height:
+        height = args.max_height
+
+    for j, infile in enumerate(infiles):
+        i = j + 1
+        if not args.quiet:
+            percent = int(round(i / float(total) * 100))
+            sys.stdout.write(u"\rprzekonwertowano %d%% (plik %d z %d)" % (percent, i, total))
+            sys.stdout.flush()
+            if i == total:
+                sys.stdout.write("\n")
+
         try:
             img = Image.open(infile)
         except IOError, e:
@@ -74,13 +81,14 @@ if __name__ == "__main__":
             sys.stderr.write("\n")
         else:
             if watermark_img:
-                img = convert(img, scale=args.scale / 100., watermark_img=watermark_img, watermark_coverage=args.watermark_coverage / 100.)
+                img = convert(img, scale=scale, width=width, height=height, watermark_img=watermark_img, watermark_coverage=args.watermark_coverage / 100.)
             else:
-                img = convert(img, scale=args.scale / 100.)
+                img = convert(img, scale=scale, width=width, height=height)
 
             if outfile is None:
                 path, extension = os.path.splitext(infile)
-                routfile = "{path}_small{extension}".format(path=path, extension=extension)
+                routfile = "{path}_p{extension}".format(path=path, extension=extension)
             elif r"%d" in outfile:
-                routfile = outfile % i
+                routfile = outfile.replace(r'%d', r'%s')
+                routfile = routfile % str(i).zfill(len(str(total)))
             img.save(routfile)
