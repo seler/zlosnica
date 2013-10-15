@@ -6,6 +6,27 @@ __author__ = u"Rafal Selewonko <rselewonko@murator.com.pl>"
 
 import math
 from PIL import Image
+from PIL.ExifTags import TAGS
+
+
+def get_exif(fn):
+    ret = {}
+    i = Image.open(fn)
+    info = i._getexif()
+    for tag, value in info.items():
+        decoded = TAGS.get(tag, tag)
+        ret[decoded] = value
+    return ret
+
+def get_exifv2(fn):
+    ret = {}
+    i = Image.open(fn)
+#    info = i._getexif()
+    info = i.tag.tags
+    for tag, value in info.items():
+        decoded = TAGS.get(tag, tag)
+        ret[decoded] = value
+    return ret
 
 
 def convert(img, scale=None, width=None, height=None, watermark_img=None, watermark_coverage=.3, watermark_opacity=1.):
@@ -42,9 +63,9 @@ def convert(img, scale=None, width=None, height=None, watermark_img=None, waterm
     # dodanie watermarka
     if watermark_img:
         watermark_width, watermark_height = watermark_img.size
-        new_watermark_width = math.ceil(new_width * watermark_coverage)
+        new_watermark_width = math.ceil(max(new_width, new_height) * watermark_coverage)
         new_watermark_height = math.ceil(new_watermark_width / float(watermark_width) * watermark_height)
-        watermark_img.thumbnail(map(int, (new_watermark_width, new_watermark_height)), Image.ANTIALIAS)
+        watermark_img = watermark_img.resize(map(int, (new_watermark_width, new_watermark_height)), Image.ANTIALIAS).copy()
 
         coords = tuple(map(int, (new_width - new_watermark_width, new_height - new_watermark_height)))
         img.paste(watermark_img, coords, watermark_img)
