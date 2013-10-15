@@ -4,7 +4,7 @@
 __author__ = u"Rafal Selewonko <rselewonko@murator.com.pl>"
 
 from PIL import Image
-from .convert import convert
+from convert import convert
 
 
 if __name__ == "__main__":

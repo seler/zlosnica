@@ -39,6 +39,11 @@ class MainWindow(QtGui.QMainWindow):
         self.setToolButtonStyle(QtCore.Qt.ToolButtonFollowStyle)
         self.statusBar().showMessage('Ready')
         self.setupFileActions()
+        self.setupEditActions()
+        self.setupTextActions()
+        self.setupBiometriaActions()
+
+        self.isModified = False
 
         helpMenu = QtGui.QMenu("Help", self)
         self.menuBar().addMenu(helpMenu)
@@ -58,14 +63,9 @@ class MainWindow(QtGui.QMainWindow):
         self.scrollArea = ScrollArea(self)
         self.scrollArea.setBackgroundRole(QtGui.QPalette.Dark)
         self.scrollArea.setWidget(self.imageLabel)
-
         self.setCentralWidget(self.scrollArea)
 
-        self.fileListDock = QtGui.QDockWidget(self)
-        self.fileList = QtGui.QTreeWidget(self.fileListDock)
-        self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, self.fileListDock)
-        self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, QtGui.QDockWidget(self))
-        self.addDockWidget(QtCore.Qt.LeftDockWidgetArea, QtGui.QDockWidget(self))
+        self.setCurrentFileName()
 
         """
         self.actionSave.setEnabled(self.textEdit.document().isModified())
@@ -361,7 +361,7 @@ class MainWindow(QtGui.QMainWindow):
         if not QtCore.QFile.exists(fileName):
             return False
 
-        self.current_image = Image.open(str(fileName))
+        self.current_image = Image.open(fileName)
 
         image = self.PIL2QImage(self.current_image)
 
@@ -419,14 +419,14 @@ class MainWindow(QtGui.QMainWindow):
             self.setCurrentFileName()
 
     def fileOpen(self):
-        f = QtGui.QFileDialog.getOpenFileName(
+        files = QtGui.QFileDialog.getOpenFileName(
             self,
             "Open File...",
-            QtCore.QDir.homePath(),
+            None,
             "Images (*.jpg *.png *.bmp *.tif *.raw);;All Files (*)")
 
-        if f:
-            self.load(f)
+        if files:
+            self.load(fn)
 
     def fileSave(self):
         #TODO: napisac zapisywanie
@@ -508,9 +508,10 @@ if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
 
     mainWindows = []
-    mw = MainWindow()
-    mw.setWindowState(QtCore.Qt.WindowMaximized)
-    mw.show()
-    mainWindows.append(mw)
+    for fn in sys.argv[1:] or [None]:
+        mw = MainWindow(fn)
+        mw.resize(700, 800)
+        mw.show()
+        mainWindows.append(mw)
 
     sys.exit(app.exec_())
