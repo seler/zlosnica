@@ -9,7 +9,13 @@ import math
 from ui import Ui_MainWindow
 from PyQt4 import QtCore, QtGui
 import os
+import re
 import sys
+import ConfigParser
+
+
+DEFAULT_FILENAME = "weronika_urbanska_1970-01-01_nazwa_okazji_%d.jpg"
+CONFIG_FILENAME = os.path.expanduser('~/.zlosnica')
 
 
 def get_exif(fn):
@@ -63,12 +69,17 @@ def convert(img, scale=None, width=None, height=None, watermark_img=None, waterm
         new_height = original_height * ratio
 
         img = img.resize(map(int, (new_width, new_height)), Image.ANTIALIAS).copy()
+    else:
+        new_width = original_width
+        new_height = original_height
 
     # dodanie watermarka
     if watermark_img:
         watermark_width, watermark_height = watermark_img.size
         new_watermark_width = math.ceil(max(new_width, new_height) * watermark_coverage)
         new_watermark_height = math.ceil(new_watermark_width / float(watermark_width) * watermark_height)
+        if new_watermark_width > new_width:
+            new_watermark_height = new_width
         watermark_img = watermark_img.resize(map(int, (new_watermark_width, new_watermark_height)), Image.ANTIALIAS).copy()
 
         coords = tuple(map(int, (new_width - new_watermark_width, new_height - new_watermark_height)))
@@ -159,25 +170,58 @@ class ZlosnicaGUI(QtGui.QMainWindow):
         self.ui.actionPreProcessFiles.triggered.connect(self.preProcessFiles)
         self.ui.actionProcessFiles.triggered.connect(self.processFiles)
         self.ui.actionFilesProcessed.triggered.connect(self.showPopup)
+        self.home = QtCore.QDir.homePath()
+
+        self.read_config()
+        self.apply_config()
+
+    def read_config(self):
+        self.config = ConfigParser.RawConfigParser()
+
+        if not os.path.exists(CONFIG_FILENAME):
+            self.config.add_section('main')
+            self.config.set('main', 'input_directory', self.home)
+            self.config.set('main', 'output_directory', self.home)
+            self.config.set('main', 'new_filename', DEFAULT_FILENAME)
+            self.config.set('main', 'label_filename', self.home)
+            self.write_config()
+
+        self.config.read(CONFIG_FILENAME)
+
+    def write_config(self):
+        with open(CONFIG_FILENAME, 'wb') as configfile:
+            self.config.write(configfile)
+
+    def apply_config(self):
+        self.ui.changeNameLineEdit.setText(self.config.get('main', 'new_filename'))
+        self.ui.labelFileLineEdit.setText(self.config.get('main', 'label_filename'))
+        self.ui.inputDirLineEdit.setText(self.config.get('main', 'input_directory'))
+        self.ui.outputDirLineEdit.setText(self.config.get('main', 'output_directory'))
+
+    def update_config(self):
+        self.config.set('main', 'input_directory', str(self.ui.inputDirLineEdit.text()))
+        self.config.set('main', 'output_directory', str(self.ui.outputDirLineEdit.text()))
+        self.config.set('main', 'new_filename', str(self.ui.changeNameLineEdit.text()))
+        self.config.set('main', 'label_filename', str(self.ui.labelFileLineEdit.text()))
 
     def selectLabelFile(self):
         self.ui.labelFileLineEdit.setText(QtGui.QFileDialog.getOpenFileName(
             self,
             u"Wskaż plik podpisu...",
-            QtCore.QDir.homePath(),
+            self.home,
             "Images (*.jpg *.png);;All Files (*)"))
 
     def selectInputDir(self):
         self.ui.inputDirLineEdit.setText(QtGui.QFileDialog.getExistingDirectory(
             self,
             u"Wskaż folder wejściowy...",
-            QtCore.QDir.homePath()))
+            self.home))
 
     def selectOutputDir(self):
         self.ui.outputDirLineEdit.setText(QtGui.QFileDialog.getExistingDirectory(
             self,
             u"Wskaż folder wyjściowy...",
-            QtCore.QDir.homePath()))
+            self.home))
 
     def preProcessFiles(self):
         self.scale = None
@@ -200,15 +244,39 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             try:
                 self.label_img = Image.open(self.label_filename)
             except IOError, e:
-                sys.stderr.write("Error opening file %s: " % self.label_filename)
-                sys.stderr.write(str(e))
-                sys.stderr.write("\n")
-                raise
+                QtGui.QMessageBox.warning(
+                    self,
+                    u"Nie można otworzyć pliku",
+                    u"Nie udało się otworzyć pliku %s. Sprawdź czy plik istnieje." % self.label_filename)
+                return
 
-        self.ui.actionProcessFiles.trigger()
+        inputDir = str(self.ui.inputDirLineEdit.text())
+        if not os.path.exists(inputDir):
+            QtGui.QMessageBox.warning(
+                self,
+                u"Folder wejściowy nie istnieje.",
+                u"Folder wejściowy %s nie istnieje. Popraw ścieżkę i spróbuj ponownie." % inputDir)
+            return
+
+        outputDir = str(self.ui.outputDirLineEdit.text())
+        if not os.path.exists(outputDir):
+            QtGui.QMessageBox.warning(
+                self,
+                u"Folder wyjściowy nie istnieje.",
+                u"Folder wyjściowy %s nie istnieje. Popraw ścieżkę i spróbuj ponownie." % outputDir)
+            return
+
+        self.files = self._getAllFiles(str(self.ui.inputDirLineEdit.text()))
+        if self.files:
+            self.ui.actionProcessFiles.trigger()
+        else:
+            QtGui.QMessageBox.warning(
+                self,
+                u"Nie znaleziono plików",
+                u"Nie znaleziono plików graficznych w folderze wejściowym %s. Sprawdź zawartość folderu wejściowego." % inputDir)
 
     def processFiles(self):
-        files = self._getAllFiles(str(self.ui.inputDirLineEdit.text()))
+        files = self.files
         for j, filename in enumerate(files):
             i = j + 1
 
@@ -238,12 +306,17 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(len(files)))
             self.ui.processProgressBar.setFormat(progress_message)
             self.ui.processProgressBar.setValue(int(i / float(len(files)) * 100))
+
+        self.update_config()
+        self.write_config()
         self.ui.actionFilesProcessed.trigger()
 
     def _getAllFiles(self, directory):
+        pattern = r'.*[.](jpg|jpeg|png|bmp|raw|tif)$'
+        prog = re.compile(pattern)
         files = []
         for dirpath, dirnames, filenames in os.walk(directory):
-            for filename in [f for f in filenames if f.lower().endswith(".jpg")]:
+            for filename in [f for f in filenames if prog.match(f.lower())]:
                 files.append(os.path.join(dirpath, filename))
         return files
 
@@ -262,13 +335,10 @@ def launch_gui(args=None):
 
 if __name__ == "__main__":
     import argparse
-    import os
-    import sys
-    #import glob
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-g', '--gui', action="store_true")
-    parser.add_argument('infile', type=str, nargs='*')
+    parser.add_argument('-i', '--infile', type=str, nargs='*')
     parser.add_argument('-o', '--outfile', type=str)
     parser.add_argument('-q', '--quiet', action="store_true")
     parser.add_argument('-s', '--scale', type=int)
