@@ -14,7 +14,7 @@ import sys
 import ConfigParser
 
 
-DEFAULT_FILENAME = "weronika_urbanska_1970-01-01_nazwa_okazji_%d.jpg"
+DEFAULT_FILENAME = "imie_nazwisko_1970-01-01_nazwa_okazji_%d.jpg"
 CONFIG_FILENAME = os.path.expanduser('~/.zlosnica')
 
 
@@ -47,7 +47,10 @@ def convert(img, scale=None, width=None, height=None, watermark_img=None, waterm
         new_width, new_height = round(original_width * scale), round(original_height * scale)
         img.thumbnail(map(int, (new_width, new_height)), Image.ANTIALIAS)
 
-    if width is not None or height is not None:
+    if width is None and height is None:
+        new_width = original_width
+        new_height = original_height
+    else:
         if width is None:
             width = original_width
         if height is None:
@@ -69,17 +72,14 @@ def convert(img, scale=None, width=None, height=None, watermark_img=None, waterm
         new_height = original_height * ratio
 
         img = img.resize(map(int, (new_width, new_height)), Image.ANTIALIAS).copy()
-    else:
-        new_width = original_width
-        new_height = original_height
 
     # dodanie watermarka
     if watermark_img:
         watermark_width, watermark_height = watermark_img.size
         new_watermark_width = math.ceil(max(new_width, new_height) * watermark_coverage)
-        new_watermark_height = math.ceil(new_watermark_width / float(watermark_width) * watermark_height)
         if new_watermark_width > new_width:
-            new_watermark_height = new_width
+            new_watermark_width = new_width
+        new_watermark_height = math.ceil(new_watermark_width / float(watermark_width) * watermark_height)
         watermark_img = watermark_img.resize(map(int, (new_watermark_width, new_watermark_height)), Image.ANTIALIAS).copy()
 
         coords = tuple(map(int, (new_width - new_watermark_width, new_height - new_watermark_height)))
@@ -267,6 +267,9 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             return
 
         self.files = self._getAllFiles(str(self.ui.inputDirLineEdit.text()))
+        self.files_number = len(self.files)
+        self.current_file_index = 0
+
         if self.files:
             self.ui.actionProcessFiles.trigger()
         else:
@@ -276,40 +279,43 @@ class ZlosnicaGUI(QtGui.QMainWindow):
                 u"Nie znaleziono plików graficznych w folderze wejściowym %s. Sprawdź zawartość folderu wejściowego." % inputDir)
 
     def processFiles(self):
-        files = self.files
-        for j, filename in enumerate(files):
-            i = j + 1
+        filename = self.files[self.current_file_index]
+        self.current_file_index += 1
+        i = self.current_file_index
 
-            try:
-                img = Image.open(filename)
-            except IOError, e:
-                sys.stderr.write("Error opening file %s: " % filename)
-                sys.stderr.write(str(e))
-                sys.stderr.write("\n")
+        try:
+            img = Image.open(filename)
+        except IOError, e:
+            sys.stderr.write("Error opening file %s: " % filename)
+            sys.stderr.write(str(e))
+            sys.stderr.write("\n")
+        else:
+            img = convert(img, scale=self.scale, width=self.max_width, height=self.max_height, watermark_img=self.label_img, watermark_coverage=self.label_size)
+
+            if self.new_filename is None:
+                #path, extension = os.path.splitext(filename)
+                #routfile = "{path}_zmniejszone{extension}".format(path=path, extension=extension)
+                new_filename = filename
+            elif r"%d" in self.new_filename:
+                new_filename = self.new_filename.replace(r'%d', r'%s')
+                new_filename = new_filename % str(i).zfill(len(str(self.files_number)))
             else:
-                img = convert(img, scale=self.scale, width=self.max_width, height=self.max_height, watermark_img=self.label_img, watermark_coverage=self.label_size)
+                path, extension = os.path.splitext(self.new_filename)
+                new_filename = "{path}_%s{extension}".format(path=path, extension=extension)
+                new_filename = new_filename % str(i).zfill(len(str(self.files_number)))
 
-                if self.new_filename is None:
-                    #path, extension = os.path.splitext(filename)
-                    #routfile = "{path}_zmniejszone{extension}".format(path=path, extension=extension)
-                    new_filename = filename
-                elif r"%d" in self.new_filename:
-                    new_filename = self.new_filename.replace(r'%d', r'%s')
-                    new_filename = new_filename % str(i).zfill(len(str(len(files))))
-                else:
-                    path, extension = os.path.splitext(self.new_filename)
-                    new_filename = "{path}_%s{extension}".format(path=path, extension=extension)
-                    new_filename = new_filename % str(i).zfill(len(str(len(files))))
+            img.save(new_filename)
 
-                img.save(new_filename)
+        progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(self.files_number))
+        self.ui.processProgressBar.setFormat(progress_message)
+        self.ui.processProgressBar.setValue(int(i / float(self.files_number) * 100))
 
-            progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(len(files)))
-            self.ui.processProgressBar.setFormat(progress_message)
-            self.ui.processProgressBar.setValue(int(i / float(len(files)) * 100))
-
-        self.update_config()
-        self.write_config()
-        self.ui.actionFilesProcessed.trigger()
+        if i == self.files_number:
+            self.update_config()
+            self.write_config()
+            self.ui.actionFilesProcessed.trigger()
+        else:
+            self.ui.actionProcessFiles.trigger()
 
     def _getAllFiles(self, directory):
         pattern = r'.*[.](jpg|jpeg|png|bmp|raw|tif)$'
