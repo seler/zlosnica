@@ -156,6 +156,7 @@ class ZlosnicaGUI(QtGui.QMainWindow):
         self.ui.outputDirPushButton.clicked.connect(self.selectOutputDir)
         self.ui.actionPreProcessFiles.triggered.connect(self.preProcessFiles)
         self.ui.actionProcessFiles.triggered.connect(self.processFiles)
+        self.ui.actionFilesProcessed.triggered.connect(self.showPopup)
 
     def selectLabelFile(self):
         self.ui.labelFileLineEdit.setText(QtGui.QFileDialog.getOpenFileName(
@@ -188,6 +189,9 @@ class ZlosnicaGUI(QtGui.QMainWindow):
         if self.ui.changeNameCheckBox.checkState():
             self.new_filename = os.path.join(str(self.ui.outputDirLineEdit.text()), str(self.ui.changeNameLineEdit.text()))
 
+        self.label_size = None
+        self.label_filename = None
+        self.label_img = None
         if self.ui.insertLabelCheckBox.checkState():
             self.label_size = self.ui.labelSizeSpinBox.value() / 100.
             self.label_filename = str(self.ui.labelFileLineEdit.text())
@@ -229,7 +233,10 @@ class ZlosnicaGUI(QtGui.QMainWindow):
 
                 img.save(new_filename)
 
+            progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(len(files)))
+            self.ui.processProgressBar.setFormat(progress_message)
             self.ui.processProgressBar.setValue(int(i / float(len(files)) * 100))
+        self.ui.actionFilesProcessed.trigger()
 
     def _getAllFiles(self, directory):
         files = []
@@ -237,6 +244,12 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             for filename in [f for f in filenames if f.lower().endswith(".jpg")]:
                 files.append(os.path.join(dirpath, filename))
         return files
+
+    def showPopup(self):
+        QtGui.QMessageBox.information(
+            self,
+            u"Konwertowanie zakończone",
+            u"Konwertowanie zakończone. Sprawdź zawartość folderu docelowego.")
 
 
 def launch_gui(args):
