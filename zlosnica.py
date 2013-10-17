@@ -243,7 +243,7 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             self.label_filename = str(self.ui.labelFileLineEdit.text())
             try:
                 self.label_img = Image.open(self.label_filename)
-            except IOError, e:
+            except IOError:
                 QtGui.QMessageBox.warning(
                     self,
                     u"Nie można otworzyć pliku",
