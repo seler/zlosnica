@@ -10,7 +10,6 @@ from ui import Ui_MainWindow
 from PyQt4 import QtCore, QtGui
 import os
 import re
-import time
 import sys
 import multiprocessing
 import ConfigParser
@@ -283,7 +282,6 @@ class ZlosnicaGUI(QtGui.QMainWindow):
                 u"Nie znaleziono plików graficznych w folderze wejściowym %s. Sprawdź zawartość folderu wejściowego." % inputDir)
 
     def processFiles(self):
-        timestart = time.time()
         lock = multiprocessing.Lock()
 
         def process_file(process_id, lock, pipe, progress_pipe, scale,
@@ -312,7 +310,7 @@ class ZlosnicaGUI(QtGui.QMainWindow):
 
                     img.save(new_filename)
 
-                progress_pipe.send(PROGRESS_PROCESS)
+                #progress_pipe.send(PROGRESS_PROCESS)
 
         processes = []
 
@@ -339,6 +337,9 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             p = multiprocessing.Process(target=process_file, args=args)
             processes.append(p)
 
+        for p in processes:
+            p.start()
+
         for j, filename in enumerate(self.files):
             i = j + 1
             if self.new_filename is None:
@@ -358,28 +359,23 @@ class ZlosnicaGUI(QtGui.QMainWindow):
         for p in processes:
             pipe_in.send(SHUTDOWN_PROCESS)
 
-        for p in processes:
-            p.start()
-
-        for j, filename in enumerate(self.files):
-            i = j + 1
-            try:
-                progress_pipe_out.recv()
-            except:
-                i = self.files_number
-                break
-            finally:
-                progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(self.files_number))
-                self.ui.processProgressBar.setFormat(progress_message)
-                self.ui.processProgressBar.setValue(int(i / float(self.files_number) * 100))
+        #for j, filename in enumerate(self.files):
+        #    i = j + 1
+        #    try:
+        #        progress_pipe_out.recv()
+        #    except:
+        #        i = self.files_number
+        #        break
+        #    finally:
+        #        progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(self.files_number))
+        #        self.ui.processProgressBar.setFormat(progress_message)
+        #        self.ui.processProgressBar.setValue(int(i / float(self.files_number) * 100))
 
         for p in processes:
             p.join()
 
         self.update_config()
         self.write_config()
-        timestop = time.time()
-        sys.stderr.write(str((timestop - timestart)))
         self.ui.actionFilesProcessed.trigger()
 
     def _getAllFiles(self, directory):
