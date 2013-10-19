@@ -10,12 +10,16 @@ from ui import Ui_MainWindow
 from PyQt4 import QtCore, QtGui
 import os
 import re
+import time
 import sys
+import multiprocessing
 import ConfigParser
 
 
 DEFAULT_FILENAME = "imie_nazwisko_1970-01-01_nazwa_okazji_%d.jpg"
 CONFIG_FILENAME = os.path.expanduser('~/.zlosnica')
+SHUTDOWN_PROCESS = 'shutthefuckup'
+PROGRESS_PROCESS = 'omgwtf'
 
 
 def get_exif(fn):
@@ -279,43 +283,104 @@ class ZlosnicaGUI(QtGui.QMainWindow):
                 u"Nie znaleziono plików graficznych w folderze wejściowym %s. Sprawdź zawartość folderu wejściowego." % inputDir)
 
     def processFiles(self):
-        filename = self.files[self.current_file_index]
-        self.current_file_index += 1
-        i = self.current_file_index
+        timestart = time.time()
+        lock = multiprocessing.Lock()
 
-        try:
-            img = Image.open(filename)
-        except IOError, e:
-            sys.stderr.write("Error opening file %s: " % filename)
-            sys.stderr.write(str(e))
-            sys.stderr.write("\n")
+        def process_file(process_id, lock, pipe, progress_pipe, scale,
+                         max_width, max_height, label_img, label_size):
+
+            process = True
+            while process:
+                recv = pipe.recv()
+                if recv == SHUTDOWN_PROCESS:
+                    break
+                else:
+                    filename, new_filename = recv
+
+                try:
+                    img = Image.open(filename)
+                except IOError, e:
+                    sys.stderr.write("Error opening file %s: " % filename)
+                    sys.stderr.write(str(e))
+                    sys.stderr.write("\n")
+                else:
+                    img = convert(img, scale=scale,
+                                  width=max_width,
+                                  height=max_height,
+                                  watermark_img=label_img,
+                                  watermark_coverage=label_size)
+
+                    img.save(new_filename)
+
+                progress_pipe.send(PROGRESS_PROCESS)
+
+        processes = []
+
+        pipe_in, pipe_out = multiprocessing.Pipe()
+        progress_pipe_in, progress_pipe_out = multiprocessing.Pipe()
+
+        if multiprocessing.cpu_count() > 1:
+            number_of_processes = multiprocessing.cpu_count() - 1
         else:
-            img = convert(img, scale=self.scale, width=self.max_width, height=self.max_height, watermark_img=self.label_img, watermark_coverage=self.label_size)
+            number_of_processes = 1
 
+        for x in range(number_of_processes):
+            args = (
+                x,
+                lock,
+                pipe_out,
+                progress_pipe_in,
+                self.scale,
+                self.max_width,
+                self.max_height,
+                self.label_img,
+                self.label_size,
+            )
+            p = multiprocessing.Process(target=process_file, args=args)
+            processes.append(p)
+
+        for j, filename in enumerate(self.files):
+            i = j + 1
             if self.new_filename is None:
                 #path, extension = os.path.splitext(filename)
                 #routfile = "{path}_zmniejszone{extension}".format(path=path, extension=extension)
-                new_filename = filename
+                rnew_filename = filename
             elif r"%d" in self.new_filename:
-                new_filename = self.new_filename.replace(r'%d', r'%s')
-                new_filename = new_filename % str(i).zfill(len(str(self.files_number)))
+                rnew_filename = self.new_filename.replace(r'%d', r'%s')
+                rnew_filename = rnew_filename % str(i).zfill(len(str(self.files_number)))
             else:
                 path, extension = os.path.splitext(self.new_filename)
-                new_filename = "{path}_%s{extension}".format(path=path, extension=extension)
-                new_filename = new_filename % str(i).zfill(len(str(self.files_number)))
+                rnew_filename = "{path}_%s{extension}".format(path=path, extension=extension)
+                rnew_filename = rnew_filename % str(i).zfill(len(str(self.files_number)))
 
-            img.save(new_filename)
+            pipe_in.send([filename, rnew_filename])
 
-        progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(self.files_number))
-        self.ui.processProgressBar.setFormat(progress_message)
-        self.ui.processProgressBar.setValue(int(i / float(self.files_number) * 100))
+        for p in processes:
+            pipe_in.send(SHUTDOWN_PROCESS)
 
-        if i == self.files_number:
-            self.update_config()
-            self.write_config()
-            self.ui.actionFilesProcessed.trigger()
-        else:
-            self.ui.actionProcessFiles.trigger()
+        for p in processes:
+            p.start()
+
+        for j, filename in enumerate(self.files):
+            i = j + 1
+            try:
+                progress_pipe_out.recv()
+            except:
+                i = self.files_number
+                break
+            finally:
+                progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(self.files_number))
+                self.ui.processProgressBar.setFormat(progress_message)
+                self.ui.processProgressBar.setValue(int(i / float(self.files_number) * 100))
+
+        for p in processes:
+            p.join()
+
+        self.update_config()
+        self.write_config()
+        timestop = time.time()
+        sys.stderr.write(str((timestop - timestart)))
+        self.ui.actionFilesProcessed.trigger()
 
     def _getAllFiles(self, directory):
         pattern = r'.*[.](jpg|jpeg|png|bmp|raw|tif)$'
