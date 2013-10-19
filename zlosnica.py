@@ -282,18 +282,15 @@ class ZlosnicaGUI(QtGui.QMainWindow):
                 u"Nie znaleziono plików graficznych w folderze wejściowym %s. Sprawdź zawartość folderu wejściowego." % inputDir)
 
     def processFiles(self):
+        import time
+        starttime = time.time()
         lock = multiprocessing.Lock()
 
-        def process_file(process_id, lock, pipe, progress_pipe, scale,
+        def process_file(process_id, lock, files_queue, progress_pipe, scale,
                          max_width, max_height, label_img, label_size):
 
-            process = True
-            while process:
-                recv = pipe.recv()
-                if recv == SHUTDOWN_PROCESS:
-                    break
-                else:
-                    filename, new_filename = recv
+            while not files_queue.empty():
+                filename, new_filename = files_queue.get()
 
                 try:
                     img = Image.open(filename)
@@ -310,11 +307,11 @@ class ZlosnicaGUI(QtGui.QMainWindow):
 
                     img.save(new_filename)
 
-                #progress_pipe.send(PROGRESS_PROCESS)
+                progress_pipe.send(PROGRESS_PROCESS)
 
         processes = []
 
-        pipe_in, pipe_out = multiprocessing.Pipe()
+        files_queue = multiprocessing.Queue(self.files_number)
         progress_pipe_in, progress_pipe_out = multiprocessing.Pipe()
 
         if multiprocessing.cpu_count() > 1:
@@ -326,7 +323,7 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             args = (
                 x,
                 lock,
-                pipe_out,
+                files_queue,
                 progress_pipe_in,
                 self.scale,
                 self.max_width,
@@ -336,9 +333,6 @@ class ZlosnicaGUI(QtGui.QMainWindow):
             )
             p = multiprocessing.Process(target=process_file, args=args)
             processes.append(p)
-
-        for p in processes:
-            p.start()
 
         for j, filename in enumerate(self.files):
             i = j + 1
@@ -354,25 +348,28 @@ class ZlosnicaGUI(QtGui.QMainWindow):
                 rnew_filename = "{path}_%s{extension}".format(path=path, extension=extension)
                 rnew_filename = rnew_filename % str(i).zfill(len(str(self.files_number)))
 
-            pipe_in.send([filename, rnew_filename])
+            files_queue.put([filename, rnew_filename])
 
         for p in processes:
-            pipe_in.send(SHUTDOWN_PROCESS)
+            p.start()
 
-        #for j, filename in enumerate(self.files):
-        #    i = j + 1
-        #    try:
-        #        progress_pipe_out.recv()
-        #    except:
-        #        i = self.files_number
-        #        break
-        #    finally:
-        #        progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(self.files_number))
-        #        self.ui.processProgressBar.setFormat(progress_message)
-        #        self.ui.processProgressBar.setValue(int(i / float(self.files_number) * 100))
+        for j, filename in enumerate(self.files):
+            i = j + 1
+            try:
+                progress_pipe_out.recv()
+            except:
+                i = self.files_number
+                break
+            finally:
+                progress_message = QtCore.QString(u"przekonwertowano %p% (plik %1 z %2)").arg(str(i)).arg(str(self.files_number))
+                self.ui.processProgressBar.setFormat(progress_message)
+                self.ui.processProgressBar.setValue(int(i / float(self.files_number) * 100))
 
         for p in processes:
             p.join()
+
+        stoptime = time.time()
+        print stoptime - starttime
 
         self.update_config()
         self.write_config()
