@@ -1,2 +1,6 @@
 syntax: glob
 .ropeproject
+*~
+build
+dist
+*.pyc

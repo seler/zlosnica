@@ -161,6 +161,40 @@ def launch(args):
             img.save(routfile)
 
 
+def process_file(process_id, lock, files_queue, progress_pipe, scale,
+		 max_width, max_height, label_filename, label_size):
+    if label_filename:
+        try:
+            label_img = Image.open(label_filename)
+        except IOError, e:
+            sys.stderr.write("Error opening file %s: " % filename)
+            sys.stderr.write(str(e))
+            sys.stderr.write("\n")
+            return
+    else:
+        label_img = None
+    
+    while not files_queue.empty():
+	filename, new_filename = files_queue.get()
+
+        try:
+	    img = Image.open(filename)
+	except IOError, e:
+	    sys.stderr.write("Error opening file %s: " % filename)
+	    sys.stderr.write(str(e))
+	    sys.stderr.write("\n")
+	else:
+	    img = convert(img, scale=scale,
+			  width=max_width,
+			  height=max_height,
+			  watermark_img=label_img,
+			  watermark_coverage=label_size)
+
+	    img.save(new_filename)
+
+	progress_pipe.send(PROGRESS_PROCESS)
+
+
 class ZlosnicaGUI(QtGui.QMainWindow):
 
     def __init__(self, parent=None):
@@ -282,42 +316,18 @@ class ZlosnicaGUI(QtGui.QMainWindow):
                 u"Nie znaleziono plików graficznych w folderze wejściowym %s. Sprawdź zawartość folderu wejściowego." % inputDir)
 
     def processFiles(self):
-        import time
-        starttime = time.time()
         lock = multiprocessing.Lock()
-
-        def process_file(process_id, lock, files_queue, progress_pipe, scale,
-                         max_width, max_height, label_img, label_size):
-
-            while not files_queue.empty():
-                filename, new_filename = files_queue.get()
-
-                try:
-                    img = Image.open(filename)
-                except IOError, e:
-                    sys.stderr.write("Error opening file %s: " % filename)
-                    sys.stderr.write(str(e))
-                    sys.stderr.write("\n")
-                else:
-                    img = convert(img, scale=scale,
-                                  width=max_width,
-                                  height=max_height,
-                                  watermark_img=label_img,
-                                  watermark_coverage=label_size)
-
-                    img.save(new_filename)
-
-                progress_pipe.send(PROGRESS_PROCESS)
-
         processes = []
 
         files_queue = multiprocessing.Queue(self.files_number)
         progress_pipe_in, progress_pipe_out = multiprocessing.Pipe()
 
-        if multiprocessing.cpu_count() > 1:
+        if multiprocessing.cpu_count() >= 2:
             number_of_processes = multiprocessing.cpu_count() - 1
         else:
             number_of_processes = 1
+
+
 
         for x in range(number_of_processes):
             args = (
@@ -328,7 +338,7 @@ class ZlosnicaGUI(QtGui.QMainWindow):
                 self.scale,
                 self.max_width,
                 self.max_height,
-                self.label_img,
+                self.label_filename,
                 self.label_size,
             )
             p = multiprocessing.Process(target=process_file, args=args)
@@ -368,9 +378,6 @@ class ZlosnicaGUI(QtGui.QMainWindow):
         for p in processes:
             p.join()
 
-        stoptime = time.time()
-        print stoptime - starttime
-
         self.update_config()
         self.write_config()
         self.ui.actionFilesProcessed.trigger()
@@ -398,6 +405,8 @@ def launch_gui(args=None):
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -416,4 +425,4 @@ if __name__ == "__main__":
     if args.gui:
         launch_gui(args)
     else:
-        launch(args)
+        launch(args)  
